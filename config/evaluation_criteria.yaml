@@ -1,0 +1,51 @@
+enable_tracing: true
+
+# LLM provider for agents and tracing
+# Options:
+#   - "anthropic": Use Claude models (requires ANTHROPIC_API_KEY, Composo v0.3.0+)
+#   - "openai": Use OpenAI models (requires OPENAI_API_KEY, works with Composo v0.2.40)
+#   - "google": Use Google Gemini models (requires GEMINI_API_KEY)
+llm_provider: "anthropic"
+
+# Model to use for each provider
+anthropic_model: "claude-sonnet-4-20250514"
+openai_model: "gpt-4o"
+google_model: "gemini-2.5-pro"
+
+# Tool calls source for trace analysis
+# Options:
+#   - "composo": Use tool calls extracted from Composo trace (only available when enable_tracing: true)
+#   - "recorder": Use tool calls from ToolCallRecorder (always available, ground truth)
+tool_calls_source: "composo"
+
+# Evaluation framework to use
+# Options:
+#   - "agent": Multi-agent evaluation (exploration, exploitation, tool use, goal pursuit, faithfulness)
+#   - "rag": RAG evaluation (faithfulness, completeness, precision, relevance)
+evaluation_type: custom
+
+# Source for the End-to-End (E2E) evaluation performed by evaluate_results.py
+# Options:
+#   - "user_facing": Use only the 'assistant_response' field (external communication).
+#   - "internal_dialog": Use only the 'assistant_internal' field (internal reasoning).
+#   - "both": Use BOTH fields concatenated ([Internal Reasoning] + [External Response]).
+#             This allows Composo to evaluate both the reasoning quality AND external communication correctness.
+e2e_evaluation_source: "both"
+
+# --- How to Write Effective Criteria ---
+# Use a clear directive: "Reward agents that...", "Penalize responses that...".
+# Be specific: Focus on a single, measurable quality per criterion.
+# Avoid conjunctions: Split criteria with "and" into separate lines.
+# Use qualifiers: Use "if" for conditional rewards/penalties.
+
+# Custom criteria for the RUNTIME trace evaluation (in simulation_runner.py)
+# These focus on the agent's internal reasoning, process adherence, and tool use.
+trace_criteria:
+  - "Reward agents that follow the procedural sequence outlined in the SOP."
+  - "Reward agents that select the appropriate tool and with all required parameters for the current step of the SOP."
+  #- "Reward agents whose responses and actions are consistent with the information provided in the SOP and scenario context, without fabricating entities, details, or requirements that are not present."
+
+# Custom criteria for the END-TO-END evaluation (in evaluate_results.py)
+# This evaluates both internal reasoning quality and external response correctness together.
+e2e_criteria:
+  - "Reward responses whose internal reasoning accurately identifies the current SOP state and trigger conditions, and whose external response (or lack thereof) correctly aligns with what the SOP requires. If SOP requires waiting for a trigger, reward responses that do not respond or acknowledge waiting. If SOP requires action, reward responses that take the correct action with appropriate content., Do not evaluate tool calls"

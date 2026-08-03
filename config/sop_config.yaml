@@ -1,0 +1,100 @@
+# labryon/config/sop_config.yaml
+
+llm_provider: "google"
+
+# --- Model Configuration ---
+# The model names for each provider.
+anthropic_model_name: "claude-sonnet-4-20250514"
+google_model_name: "gemini-2.5-pro"
+
+# --- Temperature Settings ---
+# Fine-tune the creativity and determinism of the LLM for specific tasks.
+# Values range from 0.0 (most deterministic) to 2.0 (most creative).
+anthropic_temperatures:
+  sop_analysis: 0.0
+  sop_validation: 0.1
+  sop_aggregation: 0.3
+
+google_temperatures:
+  sop_analysis: 0.0
+  sop_validation: 0.1
+  sop_aggregation: 0.3
+
+# Prompt 1: SOP Graph Analysis
+# This prompt instructs the LLM on how to perform the full graph analysis of the SOP.
+graph_analysis_prompt: |
+  You are a senior business analyst specializing in workflow automation. Your task is to deconstruct a Standard Operating Procedure (SOP) into a structured graph format. This involves a two-step process:
+
+  **Step 1: Identify All Stakeholders**
+  First, carefully read the entire SOP and identify every unique stakeholder involved in the process. A stakeholder is any person, team, or external system that can either initiate an action (trigger) or that the agent must wait for (halter).
+
+  **IMPORTANT:** Use generalized stakeholder names that represent roles or groups, not individual entities. For example, use "Carriers" instead of listing each carrier individually, or "Customer" instead of specific customer names. Only create separate stakeholders when their roles and responsibilities are fundamentally different.
+
+  For each stakeholder, provide a brief description of their role in the process.
+
+  **Step 2: Enumerate All Possible End-to-End Scenarios**
+  Next, identify all possible **end-to-end, successful workflows** described in the SOP. An end-to-end scenario MUST start from the very beginning of the process (e.g., receiving a customer email) and continue until the process is fully complete (e.g., the final quote is sent and the case is closed).
+
+  **CRITICAL RULES:**
+  - A scenario must represent a full, successful journey through the SOP. Do not create scenarios for partial workflows, error handling, or simple clarification loops (like asking for missing information). These are variations, not distinct scenarios.
+  - If the SOP has branching logic (e.g., "if the request is type A, do X; if it's type B, do Y"), each branch that leads to a successful conclusion is a separate end-to-end scenario.
+
+  For each scenario, you must break it down into a sequence of "partitions." A partition represents a segment of work that begins with a trigger from a stakeholder and ends when the agent is fully blocked, waiting for a response from another (or the same) stakeholder.
+
+  **Illustrative Example (Few-Shot Learning):**
+  {few_shot_examples}
+
+  **Your Task:**
+  Apply this same two-step analysis to the SOP provided below.
+
+  **The SOP is as follows:**
+  <sop>
+  {sop}
+  </sop>
+
+  **CRITICAL INSTRUCTIONS:**
+  - Your final output MUST be a single, valid JSON object.
+  - **STAKEHOLDERS DEFINITION**: Stakeholders are ONLY external human entities or roles that interact with the AI system. Examples: Customers, Carriers, Team Members, Managers, Partners.
+    - ✅ INCLUDE: Human roles that send messages, make requests, provide approvals
+    - ❌ EXCLUDE: Internal AI agents (e.g., "Impargo Expert Agent", "orchestrator", "supervisor"), system components, tools, or APIs
+    - Use generalized role names (e.g., "Carriers") not individual entities (e.g., "DHL Carrier")
+  - First, define all stakeholders following the above rules.
+  - Then, for each distinct successful scenario you identify, create a scenario object containing the sequence of partitions for that specific path.
+  - Ensure that the `triggering_stakeholder` and `halting_stakeholder` for each partition are from the list of stakeholders you identified.
+  - **IMPORTANT**: The `triggering_stakeholder` and `halting_stakeholder` for each partition MUST be different. A partition cannot be triggered and halted by the same stakeholder.
+  - **NO DUPLICATE SCENARIOS**: Never create duplicate scenarios where all partitions have the same triggering and halting stakeholders in the same order. Each scenario must represent a unique workflow path with different stakeholder interactions or sequencing.
+  - If there are any ambiguities or unclear aspects in the SOP that could affect partitioning or stakeholder assignment, document them in the `ambiguities` array. This helps identify areas where the workflow interpretation might vary between runs.
+
+  Return a single JSON object with the following structure:
+  {{
+    "stakeholders": [
+      {{
+        "name": "Stakeholder A",
+        "description": "Role of Stakeholder A in the process."
+      }},
+      {{
+        "name": "Stakeholder B",
+        "description": "Role of Stakeholder B in the process."
+      }}
+    ],
+    "scenarios": [
+      {{
+        "scenario_name": "Scenario 1: Happy Path",
+        "description": "A brief description of this specific workflow path.",
+        "stakeholders": ["Stakeholder A", "Stakeholder B"],
+        "partitions": [
+          {{
+            "partition_name": "Initial Intake",
+            "task": "The specific instructions for this partition.",
+            "triggering_stakeholder": "Stakeholder A",
+            "halting_stakeholder": "Stakeholder B",
+            "triggering_event_description": "Description of the event that starts this partition.",
+            "expected_agent_output": "Description of what the agent does and its final wait state."
+          }}
+        ]
+      }}
+    ],
+    "ambiguities": [
+      "Description of any unclear aspects in the SOP that could lead to different interpretations"
+    ]
+  }}

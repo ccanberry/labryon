@@ -1,0 +1,290 @@
+# --- LLM Provider Configuration ---
+# The LLM provider to use for generating scenarios.
+# Supported providers: "anthropic", "google"
+llm_provider: "google"
+
+generate_transition_scenarios: true
+master_worst_case_complexity: 3 # The number of ideas to merge into a single master worst-case conversation chunk.
+transition_generation_strategy: "backward_only" # "backward_only", "forward_only", or "all"
+
+# A list of all tool names that represent external communication.
+# This is used by the simulation_runner to capture the 'response' field.
+external_communication_tools:
+  - "reply_to_email"
+  - "send_email"
+  - "outlook_reply_to_email"
+  - "outlook_send_email"
+  - "send_teams_channel_message"
+  - "send_teams_chat_message"
+  - "reply_teams_message"
+
+
+
+# --- Model Configuration ---
+# The model names for each provider.
+anthropic_model_name: "claude-sonnet-4-20250514"
+anthropic_temperatures:
+  sop_analysis: 0.0
+  scenario_generation: 0.5
+  creative_generation: 1.0
+  formatting: 0.1
+
+google_model_name: "gemini-2.5-pro"
+google_temperatures:
+  sop_analysis: 0.0
+  scenario_generation: 0.5
+  creative_generation: 0.8
+  formatting: 0.1
+
+
+
+# Prompt 2: Master Happy Path Generation
+# Generates a single, coherent, end-to-end happy path conversation, structured by partition.
+master_happy_path_generation_prompt: |
+  You are a senior quality assurance engineer creating a single, end-to-end "happy path" test case that flows logically from start to finish.
+
+  I will provide you with the AI agent's full Standard Operating Procedure (SOP) and a list of sequential "happy path" partitions that make up the complete workflow.
+
+  Your task is to generate a single, continuous, and logical conversation that covers all these partitions in order. The final scenario should feel like a natural interaction, where the events of one part lead directly to the next.
+
+  **AI Agent's Full SOP:**
+  <sop>
+  {sop}
+  </sop>
+
+  **Sequential Workflow Partitions:**
+  <partitions>
+  {partitions_json}
+  </partitions>
+
+  **Valid Stakeholders:** {stakeholders}
+
+  **CRITICAL RULES:**
+  - **The entire conversation and all generated text MUST be in English.**
+  - The final output must be a single, valid JSON object.
+  - The conversation must be coherent and maintain a consistent narrative throughout all partitions.
+  - **MESSAGE SOURCE - CRITICALLY IMPORTANT:** For each partition, the generated 'scenario' list must ONLY contain messages FROM external stakeholders (customers, carriers, team members) TO the AI agent.
+    - ✓ ALLOWED: Messages from triggering_stakeholders (emails from customers, Teams messages from team members, etc.)
+    - ✗ FORBIDDEN: Messages from the AI agent itself, API call responses, tool outputs, internal system messages, agent responses, or any messages with "from: IMPARGO Expert Agent" or similar
+    - The scenario should ONLY contain INPUT messages that the agent receives, NOT the agent's outputs or responses
+  - **MESSAGE FORMAT:** Every string in the `scenario` list MUST start with `from:` (sender identifier) and `via:` (communication medium) prefixes on separate lines, followed by a blank line, then the message content.
+    - `from:` should contain the actual sender (e.g., email address for email, person name for teams, company name for sub-carrier)
+    - `via:` should contain the communication medium (e.g., "email", "teams", "sms", etc.)
+    - Example format: `from: john.doe@example.com\nvia: email\n\nMessage content here...`
+  - The content of each message must be natural and realistic. For example, if the interaction is via email, the message should look like an email. Do NOT include any metadata, tags, or labels like '[user]' or '[team]' inside the message strings.
+  - After generating the `partition_happy_paths`, you MUST ALSO create a `master_happy_path` object. This object should contain a `description` and a `scenario`. The `scenario` MUST be a single list containing all the messages from all partitions, stitched together in the correct order.
+
+  Return a JSON object with this exact structure:
+  {{
+    "partition_happy_paths": [
+      {{
+        "partition_name": "Partition A Name",
+        "scenario": [
+          "from: john.doe@example.com\nvia: email\n\nMessage 1 that starts Partition A..."
+        ]
+      }},
+      {{
+        "partition_name": "Partition B Name",
+        "scenario": [
+          "from: jane.smith@example.com\nvia: email\n\nMessage that starts Partition B..."
+        ]
+      }}
+    ],
+    "master_happy_path": {{
+      "description": "A single, coherent, end-to-end happy path conversation.",
+      "scenario": [
+        "from: john.doe@example.com\nvia: email\n\nMessage 1 that starts Partition A...",
+        "from: jane.smith@example.com\nvia: email\n\nMessage that starts Partition B..."
+      ]
+    }}
+  }}
+
+# Prompt 3: Creative Idea Generation (High Temperature)
+# Brainstorms a raw list of ideas for what could go wrong by "twisting" the happy path.
+creative_variation_prompt: |
+  You are a creative quality assurance engineer. Your task is to brainstorm a list of potential problems for a specific workflow episode by "twisting" the provided happy path conversation.
+
+  **Relevant SOP Section:**
+  <sop>
+  {sub_sop}
+  </sop>
+
+  **Your Core Task:**
+  - Review the happy path scenario and the trigger conditions for the specific episode below.
+  - Brainstorm a bulleted list of CONCISE, ONE-SENTENCE problem descriptions.
+  - Do NOT write full conversations. Just list the ideas.
+  - Order the brainstormed ideas from the most common and predictable to the most creative or hallucinated.
+
+  **Episode to Test:**
+  <episode>
+  **Name:** {partition_name}
+  **Triggering Condition:** {triggering_event_description}
+  </episode>
+
+  **Happy Path Conversation for this Episode:**
+  <happy_path>
+  {partition_happy_path}
+  </happy_path>
+
+  **Your Required Output:**
+  {generation_mode_instruction}
+
+# Prompt 4: Scenario and Conversation Generation (Low Temperature)
+# Takes a list of abstract ideas and generates all unhappy paths and the master unhappy path.
+formatting_prompt: |
+  You are an expert test scenario writer. I will provide you with a list of abstract ideas for "unhappy path" scenarios.
+
+  Your task is to take ALL these ideas and convert them into a single, valid JSON object containing full, realistic conversations that are variations of the provided "happy path" context.
+
+  **Your Responsibilities:**
+  1.  For EACH idea in the provided list, create a complete, individual "unhappy_path" scenario.
+  2.  After creating the individual paths, create ONE "partition_unhappy_path" that MUST include ALL problems from ALL ideas in the list. This master path should contain enough messages to address every single problem mentioned. Every idea must be represented as a problem in the combined scenario.
+
+  **AI Agent's Full SOP (for context):**
+  <sop>
+  {sop}
+  </sop>
+
+  **The "Source of Truth" Happy Path Conversation:**
+  <happy_path_context>
+  {happy_path_context_json}
+  </happy_path_context>
+
+  **Episode to Test:**
+  <episode>
+  **Name:** {partition_name}
+  **Triggering Stakeholder:** {triggering_stakeholder}
+  **Triggering Condition:** {triggering_event_description}
+  **Expected Outcome (Wait State):** {expected_agent_output}
+  </episode>
+
+  **Ideas to Convert into Scenarios:**
+  <ideas>
+  {all_ideas_to_format}
+  </ideas>
+
+  **CRITICAL RULES:**
+  - **JSON ONLY:** Your response must be ONLY a single, valid JSON object. Do not include any text, explanations, markdown formatting, or code blocks before or after the JSON.
+  - **CONTEXT IS KING:** The provided `happy_path_context` is the "source of truth." All generated scenarios MUST be variations of this story. Use the same entities, locations, and general details. The unhappy path should only introduce a minimal, logical "twist" to this existing narrative.
+  - **MESSAGE SOURCE - CRITICALLY IMPORTANT:** Every message in the `scenario` MUST be FROM external stakeholders (customers, carriers, team members) TO the AI agent.
+    - ✓ ALLOWED: Messages from the triggering_stakeholder (emails from customers, Teams messages from team members, etc.)
+    - ✗ FORBIDDEN: Messages from the AI agent itself, API call responses, tool outputs, internal system messages, agent responses, or any messages with "from: IMPARGO Expert Agent" or similar
+    - The scenario should ONLY contain INPUT messages that the agent receives, NOT the agent's outputs or responses
+  - **MESSAGE FORMAT:** Every string in the `scenario` list MUST start with `from:` (sender identifier) and `via:` (communication medium) prefixes on separate lines, followed by a blank line, then the message content.
+    - `from:` should contain the actual sender (e.g., email address for email, person name for teams, company name for sub-carrier)
+    - `via:` should contain the communication medium (e.g., "email", "teams", "sms", etc.)
+    - Example format: `from: john.doe@example.com\nvia: email\n\nMessage content here...`
+  - **STRUCTURE:** The `scenario` field MUST be a flat list of strings. Each string must ONLY contain the raw message content prefixed with the 'from' and 'via' lines. Do NOT wrap messages in objects.
+  - For each individual `unhappy_path`, the "description" field MUST be a concise, 4-keyword summary of the idea.
+  - For the `partition_unhappy_path`, the "description" MUST be a full, descriptive sentence that summarizes the combined scenario.
+  - **REALISM:** The content of each message must be natural and realistic (e.g., like an email). Do NOT include any metadata or tags like '[user]'.
+  - **CONDITIONAL LOGIC:**
+    - The scenario must logically represent the problem, and the **final message** MUST resolve the issue by providing the correct or missing information.
+  - **MASTER PATH COMPLETENESS AND TEMPORAL LOGIC:**
+    - The `partition_unhappy_path` MUST be structured as a sequence of logical segments, where each segment corresponds to a partition in the workflow.
+    - For each partition, the scenario must first introduce messages that create ALL the unhappy path problems.
+    - CRUCIALLY, the scenario must then include a final message for that segment that RESOLVES all of those problems, providing the necessary correct information to allow the workflow to proceed.
+    - Only after one partition's segment is fully introduced and resolved should the conversation continue to the next partition's trigger. The entire conversation must be in a logical, temporal order.
+    - The final `partition_unhappy_path.scenario` must contain enough messages to represent and resolve ALL problems from ALL ideas.
+
+  Return a JSON object with this exact structure:
+  {{
+    "unhappy_paths": [
+      {{
+        "description": "Concise, 4-keyword summary of idea 1.",
+        "scenario": [
+          "from: user@example.com\nvia: email\n\nFull text of message 1...",
+          "from: user@example.com\nvia: email\n\nFull text of message 2..."
+        ]
+      }}
+    ],
+    "partition_unhappy_path": {{
+      "description": "A full, descriptive sentence summarizing the combined scenario.",
+      "scenario": [
+        "from: another_user@example.com\nvia: email\n\nFull text of message 1...",
+        "from: another_user@example.com\nvia: email\n\nFull text of message 2..."
+      ]
+    }}
+  }}
+
+# Prompt 5: End-to-End Unhappy Path Stitching
+end_to_end_unhappy_path_prompt: |
+  You are a master storyteller and QA engineer. Your task is to create a single, coherent, end-to-end "master unhappy path" by stitching together several disconnected conversation fragments.
+
+  **The "Source of Truth" Happy Path Conversation:**
+  <happy_path_context>
+  {master_happy_path_json}
+  </happy_path_context>
+
+  **Disconnected Unhappy Path Segments (one for each partition):**
+  <unhappy_segments>
+  {partition_unhappy_paths_json}
+  </unhappy_segments>
+
+  **CRITICAL RULES:**
+  - **COHERENT NARRATIVE:** Rewrite and connect the provided unhappy segments into a single, logical story. The final scenario must flow naturally from one partition's unhappy events to the next.
+  - **CONTEXT IS KING:** The provided `happy_path_context` is the "source of truth." Your final unhappy path must be a variation of this story, using the same entities, locations, and general details.
+  - **ALL-INCLUSIVE:** You must incorporate the core problem from each segment in the `unhappy_segments` list.
+  - **LOGICAL FLOW:** The problems should be introduced in the order of the partitions. The conversation should escalate and then resolve.
+  - **FINAL RESOLUTION:** The very last message in the entire scenario must resolve all the problems that were introduced throughout the story.
+  - **MESSAGE SOURCE - CRITICALLY IMPORTANT:** All messages must be FROM external stakeholders (customers, carriers, team members) TO the AI agent.
+    - ✓ ALLOWED: Messages from triggering_stakeholders (emails from customers, Teams messages from team members, etc.)
+    - ✗ FORBIDDEN: Messages from the AI agent itself, API call responses, tool outputs, internal system messages, agent responses, or any messages with "from: IMPARGO Expert Agent" or similar
+    - The scenario should ONLY contain INPUT messages that the agent receives, NOT the agent's outputs or responses
+  - **MESSAGE FORMAT:** Every string in the `scenario` list MUST start with `from:` (sender identifier) and `via:` (communication medium) prefixes on separate lines, followed by a blank line, then the message content.
+    - `from:` should contain the actual sender (e.g., email address for email, person name for teams, company name for sub-carrier)
+    - `via:` should contain the communication medium (e.g., "email", "teams", "sms", etc.)
+    - Example format: `from: john.doe@example.com\nvia: email\n\nMessage content here...`
+    - Each message must be realistic like an email or a chat message. Do NOT include any metadata or tags.
+
+  Return a JSON object with this exact structure:
+  {{
+    "description": "A single, coherent, end-to-end unhappy path that incorporates problems from all partitions.",
+    "scenario": [
+      "from: john.doe@example.com\nvia: email\n\nMessage 1 that introduces a problem in the first partition...",
+      "from: john.doe@example.com\nvia: email\n\nMessage 2 that resolves the first partition's problem and triggers the second...",
+      "from: jane.smith@example.com\nvia: email\n\nMessage 3 that introduces a problem in the second partition...",
+      "from: jane.smith@example.com\nvia: email\n\nMessage N that finally resolves everything..."
+    ]
+  }}
+
+# Prompt 6: Metadata Enrichment
+# Adds technical metadata (message_id, timestamp, etc.) to the generated scenarios based on the medium.
+metadata_enrichment_prompt: |
+  You are a data formatting specialist. I will provide you with a list of conversation messages.
+  
+  Your task is to add technical metadata to each message header.
+  
+  **Instructions:**
+  1. For each message, analyze the `via:` field (e.g., "email", "teams").
+  2. Look at the **Available Tools** below and identify which tool corresponds to this communication medium (e.g., `reply_to_email` for "email").
+  3. Check that tool's usage definition to see what IDs or metadata are required (e.g., `message_id`).
+  4. Add these required fields to the message header with realistic values.
+
+  **Input Scenarios:**
+  <scenarios>
+  {scenarios_json}
+  </scenarios>
+
+  **Available Tools:**
+  <tool_definitions>
+  {tool_definitions}
+  </tool_definitions>
+
+  **CRITICAL RULES:**
+  - **PRESERVE CONTENT:** Do NOT change the message content (body). Only add/update the header block.
+  - **HEADER FORMAT:** The header block must contain `from:` and any REQUIRED METADATA derived from the matching tool definition.
+  - **REMOVE HINTS:** Do NOT include the `via:` field in the final output. It was only used for your inference.
+  - **INFERENCE:** Use the `via` field from the input to identify the correct tool, then generate the required metadata.
+  - **STRICT ADHERENCE:** If the identified tool requires a specific ID (like `message_id`), you MUST generate it.
+  - **CONSISTENCY:** Ensure ID formats are consistent throughout the scenario (e.g., always use `msg_...`). If messages belong to the same logical thread, ensure shared IDs (like `conversation_id` or `thread_id`) remain persistent. Do not change ID styles halfway.
+  - **OUTPUT STRUCTURE:** Return a single JSON object containing the enriched list of strings.
+
+  Return a JSON object with this exact structure:
+  {{
+    "enriched_scenarios": [
+      "from: ...\\nmessage_id: ...\\ntimestamp: ...\\n\\nContent...",
+      "..."
+    ]
+  }}
+

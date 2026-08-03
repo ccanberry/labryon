@@ -1,0 +1,403 @@
+# --- Mock Tool Behavior Configuration ---
+
+# This is a global default. If a specific tool does not have a success_rate,
+# this value will be used. 1.0 means 100% success.
+default_success_rate: 1.0
+
+# Use LLM to generate realistic fake responses based on input parameters
+# If false, uses static responses from mock_tool_responses below
+default_use_llm_generation: false
+
+# Validate required parameters (parameters without Optional or default values)
+# If true, tools will return error responses when required parameters are missing or empty
+# If false, tools will accept any parameters and generate responses
+default_validate_params: true
+
+# Mapping for sub-agents whose tools are hardcoded in the backend codebase
+# instead of being defined in the database. The snapshot script will use this
+# to inject the correct tool bindings into the worker configuration.
+HARDCODED_SUBAGENT_TOOLS:
+  impargo-expert:
+    - create_impargo_customer
+    - get_impargo_customer
+    - create_impargo_offer
+    - list_impargo_offers
+    - get_impargo_orders
+
+# --- Static Responses for Mock Tools ---
+# For each tool, define a success_response and a failure_response.
+# The success_rate (0.0 to 1.0) determines the probability of returning the success_response.
+mock_tool_responses:
+  send_email:
+    success_rate: 0.9
+    use_llm_generation: true
+    llm_hints: "Generate realistic message ID (format: msg_email_[timestamp]). Status should be 'sent' or 'draft' based on save_as_draft parameter. Copy subject from input parameters. This is a confirmation response, not the actual email content."
+    success_response:
+      success: true
+      to: []
+      subject: ""
+      status: "sent"
+      message_id: "msg_123"
+      category: "AI_Done"
+    failure_response:
+      success: false
+      error: "SMTP server connection failed."
+
+  reply_to_email:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate realistic message ID (format: msg_reply_[timestamp]). Set reply_type to 'reply_all' if reply_all=true parameter, otherwise 'reply'. Status should be 'sent' or 'draft' based on save_as_draft parameter. Category from input or default 'AI_Done'. This is a confirmation, not the email content."
+    success_response:
+      success: true
+      reply_type: "reply_all"
+      status: "sent"
+      message_id: "msg_reply_123"
+      category: "AI_Done"
+    failure_response:
+      success: false
+      error: "Original message ID not found."
+
+  create_impargo_customer:
+    success_rate: 0.99
+    use_llm_generation: true
+    llm_hints: "Use name from input. Generate realistic 24-character hex ID. If email provided in input, use it. Add telephone from input or '00' if not provided. Include address details if provided (city, country, zip, street). Use German company naming conventions (GmbH, AG, etc.)."
+    success_response:
+      id: "cus_667d8a9b8c7d6e5f4a3b2c1d"
+      name: "Test Customer GmbH"
+      email: "test@customer.com"
+    failure_response:
+      error: "Invalid address format provided/Cannot implement required query."
+
+  get_impargo_customer:
+    success_rate: 0.99
+    use_llm_generation: true
+    llm_hints: "If customer_id provided, use it. If customer_name provided, match it closely. Generate 24-char hex ID. Use German logistics company naming. Include realistic address with German city, country='de', zip code, and street."
+    success_response:
+      id: "cus_667d8a9b8c7d6e5f4a3b2c1d"
+      name: "Test Customer GmbH"
+      email: "test@customer.com"
+      address:
+        country: "de"
+        city: "Berlin"
+    failure_response:
+      error: "Customer not found."
+
+  create_impargo_offer:
+    success_rate: 0.8
+    use_llm_generation: true
+    llm_hints: "Generate 24-char hex ID. Status should be 'pending'. Price: 800-3000 EUR based on route distance. Use customer_id and reference from input. Sharing URL: https://impargo.com/offer/{id}. Include pickup and delivery stops from input."
+    success_response:
+      id: "off_667d8b3c8c7d6e5f4a3b2c2e"
+      status: "pending"
+      price: 1250.50
+      sharing_url: "https://impargo.com/offer/off_667d8b3c8c7d6e5f4a3b2c2e"
+    failure_response:
+      error: "Invalid stop location. Address could not be geocoded."
+
+  list_impargo_offers:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Return 1-3 offers as array. Use reference filter from input if provided. Generate 24-char hex IDs. Status: 'pending', 'accepted', or 'archived'. Prices: 800-3000 EUR. Include customer info, pickup/delivery locations, and dates."
+    success_response:
+      - id: "off_667d8b3c8c7d6e5f4a3b2c2e"
+        status: "pending"
+        price: 1250.50
+        reference: "RFQ-123"
+    failure_response: []
+
+  get_impargo_orders:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Status must be 'IN_TRANSIT' or 'DELIVERED'. Use reference parameter from input. Comments field is critical - for IN_TRANSIT include 'ETA: YYYY-MM-DD | Last milestone: [location]', for DELIVERED include 'Delivered on: YYYY-MM-DD' and optionally 'POD_URL: https://cdn.impargo.com/pod/[reference].pdf'. Customer: name and id. Load: weight (float tons), length (float meters). Stops: pickup and delivery locations with city and country."
+    success_response:
+      success: true
+      orders:
+        - id: "ord_123"
+          reference: "ORDER-12345"
+          status: "IN_TRANSIT"
+          comments: "ETA: 2025-01-25 | Last milestone: Departed warehouse"
+          customer: {}
+          load: {}
+          stops: []
+      total_count: 1
+      has_more: false
+    failure_response:
+      success: false
+      error: "Failed to retrieve orders."
+
+  knowledge_base_search:
+    success_rate: 1.0
+    use_llm_generation: false  # Use actual knowledge base content, not LLM-generated
+    success_response:
+      - source: "SOP_Document.pdf"
+        content: "For all RFQs, the standard procedure is to first check the customer's credit limit."
+      - source: "SOP_Document.pdf"
+        content: "High-value shipments must be insured. Contact the finance department for details."
+    failure_response:
+      - source: "Error"
+        content: "The knowledge base search returned no relevant results for the query."
+
+  store_fact_memory:
+    success_rate: 1.0
+    success_response:
+      status: "success"
+      memory_id: ""
+    failure_response:
+      status: "error"
+      message: "Failed to write to memory database."
+
+  query_fact_memory:
+    success_rate: 1.0
+    success_response:
+      - memory_id: ""
+        title: ""
+        content: "Yeah, seems right."
+    failure_response: []
+
+  update_fact_memory:
+    success_rate: 1.0
+    success_response:
+      status: "success"
+      memory_id: ""
+    failure_response:
+      status: "error"
+      message: "Memory ID not found."
+
+  store_operation_memory:
+    success_rate: 1.0
+    success_response:
+      status: "success"
+      memory_id: ""
+    failure_response:
+      status: "error"
+      message: "Failed to store operation memory."
+
+  query_operation_memory:
+    success_rate: 1.0
+    success_response:
+      - memory_id: ""
+        title: ""
+        content: "Offer created"
+    failure_response: []
+
+  get_active_operations:
+    success_rate: 1.0
+    success_response:
+      - operation_id: ""
+        status: "success"
+        description: ""
+    failure_response: []
+
+  list_teams:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate 1-3 teams. Use logistics/operations naming (Logistics Operations, Customer Service, Warehouse Team). Generate realistic team IDs. Keep descriptions brief and relevant."
+    success_response:
+      success: true
+      count: 1
+      items:
+        - id: "team_abc123"
+          display_name: "Logistics Team"
+          description: "Coordination for all logistics operations."
+    failure_response:
+      success: false
+      count: 0
+      items: []
+      error: "Could not connect to Microsoft Graph API."
+
+  list_teams_channels:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate 2-4 channels. Always include 'General'. Add relevant channels like 'Urgent', 'POD_Escalations', 'Customer_Issues'. Generate channel IDs and email addresses. Use team_id from input."
+    success_response:
+      success: true
+      count: 1
+      items:
+        - id: "chan_xyz789"
+          display_name: "General"
+          description: "General announcements and discussions."
+    failure_response:
+      success: false
+      count: 0
+      items: []
+      error: "Team ID not found or access denied."
+
+  send_teams_channel_message:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate realistic message_id (format: msg_teams_[timestamp]). Use current ISO timestamp. This is just a send confirmation, not the message content."
+    success_response:
+      success: true
+      message_id: "msg_teams_123"
+      timestamp: "2025-01-15T10:30:00Z"
+    failure_response:
+      success: false
+      error: "Channel not found or permissions error."
+
+  send_teams_chat_message:
+    success_rate: 1.0
+    success_response:
+      success: true
+      message_id: ""
+      timestamp: ""
+    failure_response:
+      success: false
+      error: "Chat ID not found or user is not a member."
+
+  reply_teams_message:
+    success_rate: 1.0
+    success_response:
+      success: true
+      reply_id: ""
+      timestamp: ""
+    failure_response:
+      success: false
+      error: "Original message ID not found in the specified channel."
+
+  list_teams_chats:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate 1-3 chats. Chat types: 'oneOnOne' or 'group'. For group chats, include topic like 'Project Discussion' or 'Weekly Sync'. Generate chat IDs, ISO timestamps for created_at and last_updated."
+    success_response:
+      success: true
+      count: 1
+      items:
+        - id: ""
+          topic: ""
+          chat_type: ""
+    failure_response:
+      success: false
+      count: 0
+      items: []
+      error: "Failed to retrieve chat list."
+
+  # Outlook tools (email with categorization)
+  read_emails:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate 1-3 customer inquiry emails. Topics: shipment status, delivery updates, POD requests. Include reference numbers (REF-xxx, ORDER-xxx) in body. Vary customer names and domains. Use realistic subjects and professional language. Messages should trigger different workflow branches - some clear requests, some missing info, some urgent. Set is_read=false for new emails. Use ISO timestamps for received_at."
+    success_response:
+      success: true
+      count: 1
+      messages:
+        - id: "msg_123"
+          from_email: "customer@example.com"
+          to_emails: ["support@company.com"]
+          subject: "Shipment Status Inquiry"
+          body: "Hello, can you provide status for order REF-12345?"
+          received_at: "2025-01-15T10:30:00Z"
+          is_read: false
+          has_attachments: false
+          conversation_id: "conv_123"
+    failure_response:
+      success: false
+      count: 0
+      messages: []
+      error: "Failed to read emails from mailbox."
+
+  categorize_email:
+    success_rate: 1.0
+    success_response:
+      success: true
+      message_id: ""
+      categories: ["AI_Done"]
+    failure_response:
+      success: false
+      error: "Message ID not found or categorization failed."
+
+  # Slack tools
+  send_message_to_channel:
+    success_rate: 1.0
+    success_response:
+      success: true
+      channel: ""
+      ts: ""
+      message: ""
+    failure_response:
+      success: false
+      error: "Channel not found or bot not in channel."
+
+  send_message_to_user:
+    success_rate: 1.0
+    success_response:
+      success: true
+      channel: ""
+      ts: ""
+      message: ""
+    failure_response:
+      success: false
+      error: "User not found or unable to open DM."
+
+  reply_to_thread:
+    success_rate: 1.0
+    success_response:
+      success: true
+      channel: ""
+      thread_ts: ""
+      ts: ""
+      message: ""
+    failure_response:
+      success: false
+      error: "Thread not found or channel access denied."
+
+  lookup_user:
+    success_rate: 1.0
+    use_llm_generation: true
+    llm_hints: "Generate a realistic user profile for a Slack user, including name and email."
+    success_response:
+      success: true
+      user:
+        id: ""
+        name: ""
+        real_name: ""
+        email: ""
+    failure_response:
+      success: false
+      user: null
+      error: "User not found."
+
+  # Translogica tools
+  search_sending:
+    success_rate: 0.95
+    use_llm_generation: true
+    llm_hints: "Generate a list of one or more realistic shipment records. Status should be 'In Transit' or 'Delivered'."
+    success_response:
+      success: true
+      count: 1
+      sendings:
+        - id: ""
+          purchase_order: ""
+          reference: ""
+          status: "In Transit"
+          pickup_date: ""
+          delivery_date: ""
+    failure_response:
+      success: false
+      count: 0
+      sendings: []
+      error: "Failed to connect to Translogica API."
+
+  get_sending_status:
+    success_rate: 0.95
+    use_llm_generation: true
+    llm_hints: "Generate a realistic shipment status update. Status should be 'In Transit' or 'Delivered'. Include a history of status changes."
+    success_response:
+      success: true
+      sending:
+        id: ""
+        status: "Delivered"
+        history:
+          - timestamp: ""
+            status: "In Transit"
+            location: ""
+    failure_response:
+      success: false
+      sending: null
+      error: "Sending ID not found."
+
+  # Additional knowledge base search variant
+  knowledge_base_search_simple:
+    success_rate: 1.0
+    use_llm_generation: false
+    success_response: "Based on the SOP documentation, the standard procedure requires checking credit limits first."
+    failure_response: "No relevant information found in the knowledge base."
